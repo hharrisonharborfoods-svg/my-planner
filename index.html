@@ -538,7 +538,17 @@ async function load() {
     } else if (error) {
       throw error;
     } else {
-      cards = data.cards || [];
+      const cloudCards = data.cards || [];
+      // Don't overwrite local data with empty cloud data
+      let localCards = [];
+      try { localCards = JSON.parse(localStorage.getItem(STORAGE_KEY)) || []; } catch {}
+      if (cloudCards.length === 0 && localCards.length > 0) {
+        cards = localCards;
+        // Push local data to cloud
+        await sb.from('board_data').upsert({ id: BOARD_ID, cards: localCards, updated_at: new Date().toISOString() });
+      } else {
+        cards = cloudCards;
+      }
     }
     cloudReady = true;
     // Also keep a local backup
@@ -555,14 +565,33 @@ async function save() {
 
   if (SUPABASE_URL === 'YOUR_SUPABASE_URL') return; // not configured
   try {
-    await sb.from('board_data').upsert({
+    const { error } = await sb.from('board_data').upsert({
       id: BOARD_ID,
       cards: cards,
       updated_at: new Date().toISOString()
     });
+    if (error) {
+      console.error('Cloud save error:', error);
+      showSyncError('Save failed — changes saved locally only.');
+    }
   } catch (err) {
-    console.warn('Cloud save failed:', err);
+    console.error('Cloud save failed:', err);
+    showSyncError('Save failed — changes saved locally only.');
   }
+}
+
+/* Show a visible warning if sync fails */
+function showSyncError(msg) {
+  let banner = document.getElementById('syncError');
+  if (!banner) {
+    banner = document.createElement('div');
+    banner.id = 'syncError';
+    banner.style.cssText = 'background:#fee2e2;border-bottom:1px solid #fca5a5;padding:10px 28px;font-size:.85rem;color:#b91c1c;text-align:center;cursor:pointer;';
+    banner.title = 'Click to dismiss';
+    banner.onclick = () => banner.remove();
+    document.body.insertBefore(banner, document.body.children[1]);
+  }
+  banner.textContent = '⚠️ ' + msg;
 }
 
 /* Real-time sync: when another device changes data, update here */
